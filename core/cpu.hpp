@@ -6,8 +6,8 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
-#include "extensionsALUs.hpp"
 #include <iostream>
+#include <string>
 
 class Memory { 
 	private: 
@@ -113,8 +113,7 @@ class CPU {
 		
 		using ExecHandler = uint32_t (CPU<ALUType>::*)(const DecodedInstruction&, uint32_t); 
 		std::array<ExecHandler, 128> dispatch_table_; //create dispatch table for modularity, for any possible future opcodes
-
-
+		void table_helper(uint8_t opcode, ExecHandler handler); //helper function to map opcodes ot execution handlers
 
 		//execution handlers, 
 		uint32_t execute_R(const DecodedInstruction& instruction, uint32_t current_pc);
@@ -141,11 +140,15 @@ class CPU {
 
 	public: 
 		DecodedInstruction decode(uint32_t instruction);
-		uint32_t read_pc() const;
-		uint32_t execute(); 
+		uint32_t read_pc() const; 
+		uint32_t execute(const DecodedInstruction& instruction, uint32_t current_pc); 
 		void clk();
 		void reset(){pc_ = 0x80000000; regs_ = RegisterFile(); }; 
 		CPU(); //constructor populates dispatch table
+		void write_memory_word(uint32_t addr, uint32_t value) { ram_.store_word(value, addr); }
+    uint32_t read_memory_word(uint32_t addr) const { return ram_.load_uw(addr); }
+    uint32_t read_memory_byte(uint32_t addr) const { return ram_.load_ubyte(addr); }
+    uint32_t get_register(std::size_t idx) const { return regs_.read(idx); }
 };
 
 //implementations for templated CPU class —----—------------------------
@@ -245,8 +248,8 @@ DecodedInstruction CPU<ALUType>::decode(uint32_t instruction){
 
 template <typename ALUType>
 uint32_t CPU<ALUType>::execute_branch(const DecodedInstruction& instruction, uint32_t current_pc){
-	uint32_t src1 = instruction.rs1; 
-	uint32_t src2 = instruction.rs2; 
+	uint32_t src1 = regs_.read(instruction.rs1); 
+	uint32_t src2 = regs_.read(instruction.rs2); 
 	bool takebr = false; 
 	switch(instruction.funct3){
 		case 0b000: takebr = (src1 == src2); break; //BEQ, zero flag 
@@ -261,7 +264,7 @@ uint32_t CPU<ALUType>::execute_branch(const DecodedInstruction& instruction, uin
             return current_pc + 4;
     }
 	if(takebr){
-		return current_pc + (instruction.imm ); 
+		return current_pc + (instruction.imm * 2); 
 	}else{
 		return current_pc + 4; 
 	}
@@ -300,7 +303,7 @@ uint32_t CPU<ALUType>::execute_R(const DecodedInstruction& instruction, uint32_t
 			case 0x00: {uint32_t result =   alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SRL);
 				regs_.write(instruction.rd, result);
 				return current_pc + 4 ; }		
-			default: throw std::runtime_error("unknown ALU instruction, funct7 not valid for funct3 = 5")
+			default: throw std::runtime_error("unknown ALU instruction, funct7 not valid for funct3 = 5"); 
 		}
 		case 0b110: { uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::OR);
 			regs_.write(instruction.rd, result); 
@@ -391,33 +394,54 @@ uint32_t CPU<ALUType>::execute_I(const DecodedInstruction& instruction, uint32_t
 		}
 		case 0x0F:	// keep fence as no-op for now, too complicated plus just single-core emulator rn 
 			return current_pc +4; 
+			break; 
+		default: throw std::runtime_error("illegal i-type instruction");
 	}
 }
 
 template <typename ALUType> 
 uint32_t CPU<ALUType>::execute_S(const DecodedInstruction& instruction, uint32_t current_pc){
-	
+	uint32_t target;
+	switch(instruction.funct3){
+		case 0b000: target = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::ADD);  //store byte
+		ram_.store_byte(static_cast<uint8_t>(regs_.read(instruction.rs2)), target); 
+		break;  
+		case 0b001: target = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::ADD);// halfword 
+		ram_.store_hw(static_cast<uint16_t>(regs_.read(instruction.rs2)), target); 
+		break; 
+		case 0b010 : target = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::ADD); //word 
+		ram_.store_word(regs_.read(instruction.rs2), target); 
+		break; 
+		default: throw std::runtime_error("illegal funct3 for S-type instruction") ; break; 
+	}
+	return current_pc + 4; 
 }
 
 
 template <typename ALUType> 
 uint32_t CPU<ALUType>::execute_U(const DecodedInstruction& instruction, uint32_t current_pc){
-
+	switch(instruction.opcode){
+		case 0x37: regs_.write(instruction.rd, instruction.imm); break;  //LUI
+		case 0x17: regs_.write(instruction.rd, current_pc + instruction.imm); break; //AUIPC
+		default: throw std::runtime_error("invalid U-type instruction"); 
+	}
+	return current_pc +4 ; 
 }
 
 
 template <typename ALUType> 
 uint32_t CPU<ALUType>::execute_J(const DecodedInstruction& instruction, uint32_t current_pc){
-
+	uint32_t target = current_pc + instruction.imm *2 ;
+	regs_.write(instruction.rd, current_pc + 4); 
+	return target; 
 }
 
 template <typename ALUType>	//clock, fetch/decode/execute cycle contained here
 void CPU<ALUType>::clk(){
 	uint32_t instruction = ram_.load_uw(pc_); //fetch
 	DecodedInstruction decInstruction = decode(instruction);//decode
-	uint32_t current_pc =  pc_; //save current pc for JAL/JALR
-	uint32_t next_pc = 0; 
-	if(decInstruction.type== InstructionType::B){
+	uint32_t current_pc =  pc_; //save current pc for jumps
+	/*if(decInstruction.type== InstructionType::B){
 		next_pc = execute_branch(decInstruction, current_pc);
 	}else{								//!!!!!!!!!!!!!!!!!!
 		switch(decInstruction.type){ //write the actual instructions for each handler, not every output is a change in pc
@@ -443,7 +467,11 @@ void CPU<ALUType>::clk(){
 			}
 			default: throw std::runtime_error("Illegal instruction"); 
 		}
-	}
+	}*/
+
+	auto handler = dispatch_table_[decInstruction.opcode]; 
+	if(handler == nullptr) throw std::runtime_error("unavailable instruciton"); 
+	uint32_t next_pc = (this->*handler)(decInstruction, current_pc); 
 	pc_ = next_pc; 
 }
 
@@ -452,8 +480,44 @@ uint32_t CPU<ALUType>::read_pc() const{
 	return pc_; 
 }
 
+template <typename ALUType>
+void CPU<ALUType>::table_helper(uint8_t opcode, ExecHandler handler){
+	if (opcode >= dispatch_table_.size()) {
+        throw std::out_of_range("Opcode out of range");
+    }
+    dispatch_table_[opcode] = handler;
+}
 
-#endif CPU_HPP
+template <typename ALUType> 
+CPU<ALUType>::CPU(){
+    dispatch_table_.fill(nullptr);
+    
+    
+    //R-type
+    table_helper(0x33, &CPU<ALUType>::execute_R);
+    
+    // I-type: opcodes 0x13, 0x03, 0x67, 0x73, 0x0F
+    table_helper(0x13, &CPU<ALUType>::execute_I);
+    table_helper(0x03, &CPU<ALUType>::execute_I);
+    table_helper(0x67, &CPU<ALUType>::execute_I);   // JALR
+    table_helper(0x73, &CPU<ALUType>::execute_I);   // System
+    table_helper(0x0F, &CPU<ALUType>::execute_I);   // FENCE
+    
+    // S-type (opcode 0x23)
+    table_helper(0x23, &CPU<ALUType>::execute_S);
+    
+    // B-type (opcode 0x63)
+    table_helper(0x63, &CPU<ALUType>::execute_branch);
+    
+    // U-type: 0x37 (LUI) and 0x17 (AUIPC)
+    table_helper(0x37, &CPU<ALUType>::execute_U);
+    table_helper(0x17, &CPU<ALUType>::execute_U);
+    
+    // J-type (opcode 0x6F)
+    table_helper(0x6F, &CPU<ALUType>::execute_J);
+}
+
+#endif // CPU_HPP
 
 
 
