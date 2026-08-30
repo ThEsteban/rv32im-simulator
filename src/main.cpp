@@ -16,7 +16,7 @@ int main(int argc, char* argv[]){
         auto fileBytes = read_binary(argv[1]);
         auto image = parse_elf(fileBytes);
 
-        CPU<> cpu;
+        CPU cpu;
         cpu.load_program(image);
 
         constexpr std::size_t maxInstructions = 1'000'000;

@@ -19,7 +19,7 @@ void expect_guest_fault(Function&& function, GuestFaultCause expectedCause, uint
 }
 
 void run_pipeline_test() {
-    CPU<> cpu;
+    CPU cpu;
     std::cout << "Starting CPU basic pipeline tests...\n";
 
     // INSTRUCTION 1: LUI x1, 0x80000
@@ -155,7 +155,7 @@ void run_bus_fault_test() {
 
 void run_system_fault_test() {
     std::ostringstream uartOutput;
-    CPU<> cpu(uartOutput);
+    CPU cpu(uartOutput);
     DecodedInstruction systemInstruction;
     systemInstruction.opcode = 0x73;
     systemInstruction.funct3 = 0;
@@ -171,7 +171,7 @@ void run_system_fault_test() {
 
 void run_uart_guest_test() {
     std::ostringstream uartOutput;
-    CPU<> cpu(uartOutput);
+    CPU cpu(uartOutput);
 
     // LUI x1, 0x10000; ADDI x2, x0, 'A'; SB x2, 0(x1)
     cpu.write_memory_word(0x80000000, 0x100000B7);
