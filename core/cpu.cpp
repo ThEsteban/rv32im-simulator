@@ -2,9 +2,7 @@
 #include <stdexcept>
 
 std::size_t Memory::translate_address(uint32_t raddress) const {
-	assert(raddress >= BASE_OFFSET && "real address too low") ; 
 	std::size_t vaddress = raddress - BASE_OFFSET; 
-	assert(vaddress < RAM_SIZE); 
 	return vaddress; 
 }
 
@@ -20,7 +18,9 @@ uint32_t Memory::load_ubyte(uint32_t addr) const { // unsigned ld
 
 int32_t Memory::load_hws(uint32_t addr) const { //little endian
 	std::size_t offset = translate_address(addr); //save time;  
-	assert(offset + 1 < RAM_SIZE && "bug in offset");
+	if (offset + 1 < RAM_SIZE){
+		throw std::runtime_error("out of bounds address for lhw"); 
+	}
 	uint16_t raw = memory_[offset+1] << 8;                   
 	raw = raw | memory_[offset];
 	return static_cast<int16_t>(raw); 
@@ -28,7 +28,9 @@ int32_t Memory::load_hws(uint32_t addr) const { //little endian
 
 uint32_t Memory::load_uhw(uint32_t addr) const {
 	std::size_t offset = translate_address(addr); //save time;  
-	assert(offset + 1 < RAM_SIZE && "loaduhw out of bounds");  
+	if((offset + 1 < RAM_SIZE ) == false){
+		throw std::runtime_error("luhw out of bounds address");
+	}
 	uint16_t raw = memory_[offset+1] << 8; 
 	raw = raw | memory_[offset]; 
 	return raw; 
@@ -36,8 +38,10 @@ uint32_t Memory::load_uhw(uint32_t addr) const {
 
 int32_t Memory::load_ws(uint32_t addr) const {
 	std::size_t offset = translate_address(addr); 
-	assert(offset+3 < RAM_SIZE);
-	uint32_t raw = static_cast<uint32_t>(memory_[offset+3])<<24 |			     (static_cast<uint32_t>(memory_[offset+2]) << 16 )|
+	if((offset+3 < RAM_SIZE)== false){
+		throw std::runtime_error("out of bounds address for lws"); 
+	}
+	uint32_t raw = static_cast<uint32_t>(memory_[offset+3])<<24 | (static_cast<uint32_t>(memory_[offset+2]) << 16 )|
 	(static_cast<uint32_t>(memory_[offset+1]) << 8 )|
 	(static_cast<uint32_t>(memory_[offset])); 
 	return static_cast<int32_t>(raw); 
@@ -45,7 +49,9 @@ int32_t Memory::load_ws(uint32_t addr) const {
 
 uint32_t Memory::load_uw(uint32_t addr) const{
 	std::size_t offset = translate_address(addr); 
-	assert(offset+3 < RAM_SIZE); 
+	if(!(offset+3 < RAM_SIZE)){
+		throw std::runtime_error("out of bounds address for luw");
+	}
 	uint32_t raw = static_cast<uint32_t>(memory_[offset+3])<<24 |                        (static_cast<uint32_t>(memory_[offset+2]) << 16 )|
 	(static_cast<uint32_t>(memory_[offset+1]) << 8 )|
 	(static_cast<uint32_t>(memory_[offset]));
@@ -58,14 +64,18 @@ void Memory::store_byte(uint8_t value,uint32_t addr){//store byte unsigned
 
 void Memory::store_hw(uint16_t value, uint32_t addr) {
 	std::size_t offset = translate_address(addr); 
-	assert(offset + 1 < RAM_SIZE && "sthw out of bounds"); 
+	if(!(offset + 1 < RAM_SIZE)){
+		throw std::runtime_error("out of bounds address for shw"); 
+	}
 	memory_[offset] = static_cast<uint8_t>(value) ; 
 	memory_[offset +1] = static_cast<uint8_t>(value >> 8); 
 }
 
 void Memory::store_word(uint32_t value, uint32_t addr) {
 	std::size_t offset = translate_address(addr); 
-	assert(offset + 3 < RAM_SIZE && "stw out of bounds"); 
+	if(!(offset + 3 < RAM_SIZE)){
+		throw std::runtime_error("out of bounds address for sw"); 
+	}
 	memory_[offset] = static_cast<uint8_t>(value); 
 	memory_[offset+1] = static_cast<uint8_t>(value >> 8);
 	memory_[offset+2] = static_cast<uint8_t>(value >> 16);
@@ -73,17 +83,19 @@ void Memory::store_word(uint32_t value, uint32_t addr) {
 }
 
 uint32_t RegisterFile::read(std::size_t index) const {
-	assert(index < registers_.size());
+	if(!(index < registers_.size())){
+		throw std::runtime_error("invalid register too large"); 
+	}
 	return registers_[index];
 }  
 
 void RegisterFile::write(std::size_t index, uint32_t value) {
-	assert(index < registers_.size()); 
+	if(!(index < registers_.size())){
+		throw std::runtime_error("register index too large"); 
+	}
 	if (index == 0) return; 
 	registers_[index] = value; 
 }
-
-
 
 uint32_t IntegerALU::compute(uint32_t a , uint32_t b, ALUop operation) const {
 	switch(operation){	

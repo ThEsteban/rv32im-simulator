@@ -2,7 +2,6 @@
 #define CPU_HPP
 
 #include <array>
-#include <cassert>
 #include <cstdint>
 #include <cstddef>
 #include <vector>
@@ -198,6 +197,7 @@ DecodedInstruction CPU<ALUType>::decode(uint32_t instruction){
 		decInstruction.rd = (instruction >> 7) & MASK_5bit;
 		decInstruction.funct3 = (instruction >> 12 ) & MASK_3bit; 
 		decInstruction.rs1 = (instruction >>15) & MASK_5bit; 
+		decInstruction.funct7 = (instruction >> 25) & MASK_7bit; 
 		break; 
 	}
 	case InstructionType::S : {
@@ -260,11 +260,10 @@ uint32_t CPU<ALUType>::execute_branch(const DecodedInstruction& instruction, uin
         case 0b111: takebr = (src1 >= src2); break;       // BGEU 
         default:
             //handle illegal instruction exception here (for now, just assert or return pc+4)
-            assert(false && "Illegal funct3 for B-type instruction");
-            return current_pc + 4;
+           throw std::runtime_error("illegal branch instruction"); 
     }
 	if(takebr){
-		return current_pc + (instruction.imm * 2); 
+		return current_pc + (instruction.imm); 
 	}else{
 		return current_pc + 4; 
 	}
@@ -283,36 +282,40 @@ uint32_t CPU<ALUType>::execute_R(const DecodedInstruction& instruction, uint32_t
 				regs_.write(instruction.rd, result);
 				return current_pc +4 ; }
 			default: throw std::runtime_error("unkown ALU instruction, funct7 not valid for funct3=0"); 
-		}
-		case 0b001: { uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SLL);
-			regs_.write(instruction.rd, result); 
-			return current_pc + 4; }
-		case 0b010: {uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SLT);
-			regs_.write(instruction.rd, result);
-			return current_pc + 4 ; }
-		case 0b011: {uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SLTU);
-			regs_.write(instruction.rd, result);
-			return current_pc + 4 ; }
-		case 0b100: {uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::XOR);
-			regs_.write(instruction.rd, result);
-			return current_pc + 4 ; }
-		case 0b101: switch(instruction.funct7){
-			case 0x20 :{ uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SRA);
+		} 
+		if(instruction.funct7 == 0x00){
+			case 0b001: { uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SLL);
+				regs_.write(instruction.rd, result); 
+				return current_pc + 4; }
+			case 0b010: {uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SLT);
 				regs_.write(instruction.rd, result);
 				return current_pc + 4 ; }
-			case 0x00: {uint32_t result =   alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SRL);
+			case 0b011: {uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SLTU);
 				regs_.write(instruction.rd, result);
-				return current_pc + 4 ; }		
-			default: throw std::runtime_error("unknown ALU instruction, funct7 not valid for funct3 = 5"); 
+				return current_pc + 4 ; }
+			case 0b100: {uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::XOR);
+				regs_.write(instruction.rd, result);
+				return current_pc + 4 ; }
+			case 0b101: switch(instruction.funct7){
+				case 0x20 :{ uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SRA);
+					regs_.write(instruction.rd, result);
+					return current_pc + 4 ; }
+				case 0x00: {uint32_t result =   alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::SRL);
+					regs_.write(instruction.rd, result);
+					return current_pc + 4 ; }		
+				default: throw std::runtime_error("unknown ALU instruction, funct7 not valid for funct3 = 5"); 
+			}
+			case 0b110: { uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::OR);
+				regs_.write(instruction.rd, result); 
+				return current_pc + 4 ; }
+			case 0b111: {uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::AND);
+				regs_.write(instruction.rd, result);
+				return current_pc + 4 ; }
+			default: throw std::runtime_error("unknown ALU operation"); 
 		}
-		case 0b110: { uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::OR);
-			regs_.write(instruction.rd, result); 
-			return current_pc + 4 ; }
-		case 0b111: {uint32_t result =  alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), ALUop::AND);
-			regs_.write(instruction.rd, result);
-			return current_pc + 4 ; }
-		default: throw std::runtime_error("unknown ALU operation"); 
+		//multiply extension r types utilize r type = 0x01; 
 	}
+	return current_pc + 4; //for now just skip past unsupported instructions. 
 }
 
 template <typename ALUType> 
@@ -334,13 +337,14 @@ uint32_t CPU<ALUType>::execute_I(const DecodedInstruction& instruction, uint32_t
 					case 0b100:{uint32_t result = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::XOR);
 						regs_.write(instruction.rd, result);
 						return current_pc + 4;}
-					case 0b101: if(instruction.funct7 & 0x20){//funct7 bit 5 distinguishes right shift logical vs right shift arithmetic
-						{uint32_t result = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::SRA);
-						regs_.write(instruction.rd, result);
-						return current_pc + 4;} 
-					}else {uint32_t result = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::SRL);
-						regs_.write(instruction.rd, result);
-						return current_pc + 4;}
+					case 0b101: 
+						if(instruction.funct7 & 0x20){//funct7 bit 5 distinguishes right shift logical vs right shift arithmetic
+							{uint32_t result = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::SRA);
+							regs_.write(instruction.rd, result);
+							return current_pc + 4;} 
+						}else {uint32_t result = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::SRL);
+							regs_.write(instruction.rd, result);
+							return current_pc + 4;}
 					case 0b110:{uint32_t result = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::OR);
 						regs_.write(instruction.rd, result);
 						return current_pc + 4;}
@@ -362,13 +366,20 @@ uint32_t CPU<ALUType>::execute_I(const DecodedInstruction& instruction, uint32_t
 					break; 
 				case 0b101: result = ram_.load_uhw(addr); 
 					break; 
+				default : throw std::runtime_error("illegal load instruction"); 
 			}	
 			regs_.write(instruction.rd, result); 
 			return current_pc +4; 
 		}
 		case 0x67: { //jalr
-			regs_.write(instruction.rd, current_pc + 4); 
-			return (regs_.read(instruction.rs1) & (~1)); 	
+			uint32_t target = (regs_.read(instruction.rs1) + instruction.imm)  & (~1); //calc target first to prevent issue w rs1 = rd
+			if(target%4==0 && (instruction.funct3 == 0)){
+				regs_.write(instruction.rd, current_pc + 4);
+				return (target); // JALR requires bit 0 to be cleared in riscv spec
+			}else{
+				throw std::runtime_error("instruction address misaligned"); //make this actual trap later 
+			}
+
 		}
 		case 0x73: { //system instructions, implementing privelege modes later 
 			if(instruction.funct3 == 0 && instruction.imm == 0){//check if it's an ECALL/EBREAK
@@ -431,7 +442,7 @@ uint32_t CPU<ALUType>::execute_U(const DecodedInstruction& instruction, uint32_t
 
 template <typename ALUType> 
 uint32_t CPU<ALUType>::execute_J(const DecodedInstruction& instruction, uint32_t current_pc){
-	uint32_t target = current_pc + instruction.imm *2 ;
+	uint32_t target = current_pc + instruction.imm ;
 	regs_.write(instruction.rd, current_pc + 4); 
 	return target; 
 }
