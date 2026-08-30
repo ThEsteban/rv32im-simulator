@@ -1,5 +1,6 @@
 #ifndef ALU_HPP
 #define ALU_HPP
+#define INT32_MIN (-2147483647-1); 
 
 #include <cstdint>
 
@@ -13,10 +14,19 @@ enum class ALUop {
     SRL,//right
     SRA,//arithmetic right 
     SLT, //comparisons, signed set less than, unisgned set less than
-    SLTU
+    SLTU,
+    //multiplying instructions 
+    MUL, //choose lower 32 bits unsigned/signed, produces same bit pattern modulo 2^32
+    MULH,  //signed * signed upper 32 bits
+    MULHSU,// upper 32 bits unsigned * signed
+    MULHU, //upper 32 bits unsigned * unsigned
+    DIV, //signed div
+    DIVU, // unsigned
+    REM, //remainder,  non-zero has same sign as dividend
+    REMU // unsigned, 
 };
 
-//abstract base class, future proofing for extensions
+
 class ALU {
 public://compute
     virtual ~ALU() = default;
@@ -24,7 +34,7 @@ public://compute
 };
 
 //extension declarations all go in some other file extensoinALUs.hpp
-class IntegerALU : public ALU {
+class IMALU : public ALU {
 public:
     uint32_t compute(uint32_t a, uint32_t b, ALUop operation) const override;
 };

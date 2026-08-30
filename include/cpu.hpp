@@ -19,7 +19,7 @@ private:
     Bus bus_;
     RegisterFile regs_;
     uint32_t pc_ = 0x80000000;
-    IntegerALU alu_;
+    IMALU alu_;
 
     using ExecHandler =
         uint32_t (CPU::*)(const DecodedInstruction&, uint32_t);

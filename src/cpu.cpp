@@ -1,6 +1,5 @@
 #include "cpu.hpp"
 
-//implementations for templated CPU class —----—------------------------
 
 //loads program into memory
 void CPU::load_program(const ProgramImage& image){
@@ -132,42 +131,49 @@ uint32_t CPU::execute_branch(const DecodedInstruction& instruction, uint32_t cur
 //these all determine aluop and call compute, 
 uint32_t CPU::execute_R(const DecodedInstruction& instruction, uint32_t current_pc) {
     ALUop operation;
-    switch (instruction.funct3) {
-        case 0b000:
-            if (instruction.funct7 == 0x20) operation = ALUop::SUB;
-            else if (instruction.funct7 == 0x00) operation = ALUop::ADD;
-            else throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unkown ALU instruction, funct7 not valid for funct3=0");
-            break;
-        case 0b001:
-            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
-            operation = ALUop::SLL;
-            break;
-        case 0b010:
-            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
-            operation = ALUop::SLT;
-            break;
-        case 0b011:
-            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
-            operation = ALUop::SLTU;
-            break;
-        case 0b100:
-            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
-            operation = ALUop::XOR;
-            break;
-        case 0b110:
-            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
-            operation = ALUop::OR;
-            break;
-        case 0b111:
-            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
-            operation = ALUop::AND;
-            break;
-        case 0b101:
-            if (instruction.funct7 == 0x20) operation = ALUop::SRA;
-            else if (instruction.funct7 == 0x00) operation = ALUop::SRL;
-            else throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid for funct3 = 5");
-            break;
+    switch (instruction.funct7) {
+    case 0x00:
+        switch (instruction.funct3) {
+        case 0b000: operation = ALUop::ADD; break;
+        case 0b001: operation = ALUop::SLL; break;
+        case 0b010: operation = ALUop::SLT; break;
+        case 0b011: operation = ALUop::SLTU; break;
+        case 0b100: operation = ALUop::XOR; break;
+        case 0b101: operation = ALUop::SRL; break;
+        case 0b110: operation = ALUop::OR; break;
+        case 0b111: operation = ALUop::AND; break;
         default: throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU operation");
+        }
+        break;
+    case 0x20:
+        switch (instruction.funct3) {
+        case 0b000: operation = ALUop::SUB; break;
+        case 0b101: operation = ALUop::SRA; break;
+        case 0b001:
+        case 0b010:
+        case 0b011:
+        case 0b100:
+        case 0b110:
+        case 0b111:
+            throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
+        default: throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU operation");
+        }
+        break;
+    case 0x01:{ // multiplication funct7
+        switch(instruction.funct3){
+            case 0b000: operation = ALUop::MUL; break; 
+            case 0b101: operation = ALUop::DIVU; break; 
+            case 0b001: operation = ALUop::MULH; break; 
+            case 0b010: operation = ALUop::MULHSU; break; 
+            case 0b011: operation = ALUop::MULHU; break; 
+            case 0b100: operation = ALUop::DIV; break; 
+            case 0b110: operation = ALUop::REM; break; 
+            case 0b111: operation = ALUop::REMU; break; 
+            default: throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruciotn, funct7 not valid"); 
+        }
+    }
+    default:
+        throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction"); 
     }
     //multiply extension r types utilize r type = 0x01; 
     regs_.write(instruction.rd, alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), operation));
