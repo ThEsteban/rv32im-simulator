@@ -21,6 +21,8 @@ public:
     static constexpr uint32_t BASE_OFFSET = 0x80000000;// standard mem start
     Memory();
 
+    bool contains_range(uint32_t address, std::size_t size) const noexcept;
+
     //load word, halfword, byte, signed/unsigned
     //byte, load whatever's at given memory address into destination
     int32_t load_byte(uint32_t addr) const;

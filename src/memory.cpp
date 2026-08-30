@@ -10,6 +10,15 @@ std::size_t Memory::translate_address(uint32_t address) const {
 
 Memory::Memory() : memory_(RAM_SIZE, 0) {}
 
+bool Memory::contains_range(uint32_t address, std::size_t size) const noexcept {
+    if (address < BASE_OFFSET) {
+        return false;
+    }
+
+    const std::size_t offset = static_cast<std::size_t>(address - BASE_OFFSET);
+    return offset <= memory_.size() && size <= memory_.size() - offset;
+}
+
 int32_t Memory::load_byte(uint32_t addr) const {//signed 
     return static_cast<int8_t>(memory_[translate_address(addr)]);
 }
@@ -93,49 +102,32 @@ void Memory::load_program(const ProgramImage& image){
         if(segment.virtual_address < BASE_OFFSET) {
             throw std::runtime_error("segment begins below RAM"); 
         }
-        uint32_t offset = translate_address(segment.virtual_address); 
+        //make file offset into a virtual offset from memory vector 0 index
+        const std::size_t offset = translate_address(segment.virtual_address);
+
         //make sure elf fits into ram 
         if(offset > memory_.size()){
             throw std::runtime_error("segment beyond RAM");
         }
-        if(segment.memory_size > memory_.size()-offset){
+        if(!contains_range(segment.virtual_address, segment.memory_size)){
             throw std::runtime_error("segment extends beyond ram"); 
         }
         if(segment.file_data.size() > segment.memory_size){
             throw std::runtime_error("file data exceeds memory size");
         }
-        //it for sure fits now
-        //loop to load in data
-        if(segment.memory_size == segment.file_data.size()){
-            for(int i = 0; i < segment.memory_size ; i++){
-                store_byte(segment.file_data[i], offset + i); 
-            }
-        }else{
-            for(int i = 0; i < segment.file_data.size() ; i++){
-                store_byte(segment.file_data[i], offset + i); 
-            }
-            //zero initialize rest of memory size for .bss 
-            for(uint32_t j = 0; j < segment.memory_size - segment.file_data.size() ; j++){
-                store_byte(0x00, offset + segment.file_data.size() + j); 
-            }
-        }
+    } //don't let invalid program write into ram
+
+    //validated so now copy data
+        //copy in data
+    for(const ProgramSegment& segment : image.segments){
+        const std::size_t offset = translate_address(segment.virtual_address);
+
+        std::copy(segment.file_data.begin(), segment.file_data.end(), memory_.begin() + offset);
+
+        //zero initialize bss portion if there is one
+        const std::size_t zeroBegin = offset + segment.file_data.size() ;
+        const std::size_t zeroEnd = offset + segment.memory_size;
+        std::fill(memory_.begin() + zeroBegin, memory_.begin() + zeroEnd, uint8_t{0});
     }
 
 }
-
-
-
-
- /*
-void Memory::load_binary(uint32_t guest_address, std::span<const uint8_t> bytes){
-    if(!(guest_address >= BASE_OFFSET)){
-        throw std::runtime_error("program address is invalid"); 
-    }
-    uint32_t offset = guest_address - BASE_OFFSET;
-    if(!(bytes.size() > memory_.size())){// verify program size fits in memory 
-        throw std::runtime_error("Program too big"); 
-    }
-    std::copy(bytes.begin(), bytes.end(), memory_.begin() + offset); 
-}
-
-*/

@@ -2,21 +2,21 @@
 #define CPU_HPP
 
 #include "alu.hpp"
+#include "bus.hpp"
 #include "decoder.hpp"
-#include "memory.hpp"
 #include "loader.hpp"
 #include "register_file.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
+#include <iosfwd>
 #include <stdexcept>
 
 template <typename ALUType = IntegerALU> //CPU is now a template for any ALU you implement in extensionALU.hpp
 class CPU {
 private:
-    Memory ram_;
+    Bus bus_;
     RegisterFile regs_;
     uint32_t pc_ = 0x80000000;
     ALUType alu_;
@@ -24,6 +24,7 @@ private:
     using ExecHandler = uint32_t (CPU<ALUType>::*)(const DecodedInstruction&, uint32_t);
     std::array<ExecHandler, 128> dispatch_table_; //create dispatch table for modularity, for any possible future opcodes
     void table_helper(uint8_t opcode, ExecHandler handler); //helper function to map opcodes ot execution handlers
+    void initialize_dispatch_table();
 
     //execution handlers, 
     uint32_t execute_R(const DecodedInstruction& instruction, uint32_t current_pc);
@@ -40,11 +41,14 @@ public:
     void clk();
     void reset() { pc_ = 0x80000000; regs_ = RegisterFile(); }
     CPU(); //constructor populates dispatch table
-    void write_memory_word(uint32_t addr, uint32_t value) { ram_.store_word(value, addr); }
-    uint32_t read_memory_word(uint32_t addr) const { return ram_.load_uw(addr); }
-    uint32_t read_memory_byte(uint32_t addr) const { return ram_.load_ubyte(addr); }
+    explicit CPU(std::ostream& uart_output);
+    void write_memory_word(uint32_t addr, uint32_t value) { bus_.store_word(value, addr); }
+    uint32_t read_memory_word(uint32_t addr) const { return bus_.load_uw(addr); }
+    uint32_t read_memory_byte(uint32_t addr) const { return bus_.load_ubyte(addr); }
     uint32_t get_register(std::size_t index) const { return regs_.read(index); }
-    void load_program(const ProgramImage& image); 
+    void load_program(const ProgramImage& image);
+    bool halted() const noexcept { return bus_.halted(); }
+    uint32_t exit_code() const noexcept { return bus_.exit_code(); }
 };
 
 
@@ -52,16 +56,28 @@ public:
 
 template <typename ALUType>//loads program into memory
 void CPU<ALUType>::load_program(const ProgramImage& image){
-    ram_.load_program(image); 
-    if(!(image.entry_point >= Memory::BASE_OFFSET) || //validate entry point 
-    !(image.entry_point - Memory::BASE_OFFSET < Memory::BASE_OFFSET) ||
-    image.entry_point%4 == 0){
+    if(image.entry_point % 4 != 0){ //validate entry point
+        throw std::runtime_error("elf image not supported, entrypoint address inaccessible");
+    }
+    if(!bus_.contains_ram_range(image.entry_point, 4)){
         throw std::runtime_error("elf image not supported, entrypoint address inaccessible"); 
     }
     //validate entry point exists in loaded segment
-    if(!(image.segments[0].virtual_address <= image.entry_point < image.segments.end()->virtual_address + image.segments.end()->memory_size)){
+    const uint64_t entryBegin = image.entry_point;
+    const uint64_t entryEnd = entryBegin + 4;
+    bool entryPointLoaded = false;
+    for(const ProgramSegment& segment : image.segments){
+        const uint64_t segmentBegin = segment.virtual_address;
+        const uint64_t segmentEnd = segmentBegin + segment.memory_size;
+        if(entryBegin >= segmentBegin && entryEnd <= segmentEnd){
+            entryPointLoaded = true;
+            break;
+        }
+    }
+    if(!entryPointLoaded){
         throw std::runtime_error("entrypoint not within loaded segments"); 
     }
+    bus_.load_program(image);
     pc_ = image.entry_point; 
 }
 
@@ -85,6 +101,16 @@ void CPU<ALUType>::table_helper(uint8_t opcode, ExecHandler handler) {
 
 template <typename ALUType>
 CPU<ALUType>::CPU() {
+    initialize_dispatch_table();
+}
+
+template <typename ALUType>
+CPU<ALUType>::CPU(std::ostream& uart_output) : bus_(uart_output) {
+    initialize_dispatch_table();
+}
+
+template <typename ALUType>
+void CPU<ALUType>::initialize_dispatch_table() {
     dispatch_table_.fill(nullptr);
 
     //R-type
@@ -113,25 +139,28 @@ CPU<ALUType>::CPU() {
 
 template <typename ALUType> //clock, fetch/decode/execute cycle contained here
 void CPU<ALUType>::clk() {
-    const uint32_t instruction = ram_.load_uw(pc_); //fetch
+    const uint32_t instruction = bus_.fetch_instruction(pc_); //fetch
     const DecodedInstruction decoded = decode(instruction);//decode
     const uint32_t current_pc = pc_; //save current pc for jumps
     const auto handler = dispatch_table_[decoded.opcode];
     if (handler == nullptr) {
-        throw std::runtime_error("unavailable instruciton");
+        throw GuestFault(GuestFaultCause::IllegalInstruction, instruction, "unavailable instruciton");
     }
     pc_ = (this->*handler)(decoded, current_pc);
 }
 
+
+//public generic execute function t
 template <typename ALUType>
 uint32_t CPU<ALUType>::execute(const DecodedInstruction& instruction, uint32_t current_pc) {
     const auto handler = dispatch_table_[instruction.opcode];
     if (handler == nullptr) {
-        throw std::runtime_error("unavailable instruciton");
+        throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unavailable instruciton");
     }
     return (this->*handler)(instruction, current_pc);
 }
 
+//
 template <typename ALUType>
 uint32_t CPU<ALUType>::execute_branch(const DecodedInstruction& instruction, uint32_t current_pc) {
     const uint32_t src1 = regs_.read(instruction.rs1);
@@ -145,13 +174,13 @@ uint32_t CPU<ALUType>::execute_branch(const DecodedInstruction& instruction, uin
     case 0b110: take = src1 < src2; break;        // BLTU , borrow flag from full adder
     case 0b111: take = src1 >= src2; break;       // BGEU 
     default:
-        //handle illegal instruction exception here (for now, just assert or return pc+4)
-        throw std::runtime_error("illegal branch instruction");
+        //handle illegal instruction exception here (
+        throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "illegal branch instruction");
     }
     if(take){
         uint32_t jump = current_pc + instruction.imm; 
         if(jump%4 != 0){
-            throw std::runtime_error("Misaligned address"); 
+            throw GuestFault(GuestFaultCause::InstructionAddressMisaligned, jump, "Misaligned address");
         }else return jump; 
     }
     return current_pc +4 ; 
@@ -166,22 +195,38 @@ uint32_t CPU<ALUType>::execute_R(const DecodedInstruction& instruction, uint32_t
         case 0b000:
             if (instruction.funct7 == 0x20) operation = ALUop::SUB;
             else if (instruction.funct7 == 0x00) operation = ALUop::ADD;
-            else throw std::runtime_error("unkown ALU instruction, funct7 not valid for funct3=0");
+            else throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unkown ALU instruction, funct7 not valid for funct3=0");
             break;
-        if (!(instruction.funct7)){
-        case 0b001: operation = ALUop::SLL; break;
-        case 0b010: operation = ALUop::SLT; break;
-        case 0b011: operation = ALUop::SLTU; break;
-        case 0b100: operation = ALUop::XOR; break;
-        case 0b110: operation = ALUop::OR; break;
-        case 0b111: operation = ALUop::AND; break;
-        }
+        case 0b001:
+            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
+            operation = ALUop::SLL;
+            break;
+        case 0b010:
+            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
+            operation = ALUop::SLT;
+            break;
+        case 0b011:
+            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
+            operation = ALUop::SLTU;
+            break;
+        case 0b100:
+            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
+            operation = ALUop::XOR;
+            break;
+        case 0b110:
+            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
+            operation = ALUop::OR;
+            break;
+        case 0b111:
+            if (instruction.funct7 != 0x00) throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid");
+            operation = ALUop::AND;
+            break;
         case 0b101:
             if (instruction.funct7 == 0x20) operation = ALUop::SRA;
             else if (instruction.funct7 == 0x00) operation = ALUop::SRL;
-            else throw std::runtime_error("unknown ALU instruction, funct7 not valid for funct3 = 5");
+            else throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU instruction, funct7 not valid for funct3 = 5");
             break;
-        default: throw std::runtime_error("unknown ALU operation");
+        default: throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unknown ALU operation");
     }
     //multiply extension r types utilize r type = 0x01; 
     regs_.write(instruction.rd, alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), operation));
@@ -198,7 +243,7 @@ uint32_t CPU<ALUType>::execute_I(const DecodedInstruction& instruction, uint32_t
                 case 0b001: 
                     if(instruction.funct7 == 0x00){
                         operation = ALUop::SLL;  
-                    }else throw std::runtime_error("illegal operation"); 
+                    }else throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "illegal operation");
                 break;
                 case 0b010: operation = ALUop::SLT; break;
                 case 0b011: operation = ALUop::SLTU; break;
@@ -206,7 +251,7 @@ uint32_t CPU<ALUType>::execute_I(const DecodedInstruction& instruction, uint32_t
                 case 0b101: operation = instruction.funct7 & 0x20 ? ALUop::SRA : ALUop::SRL; break; //funct7 bit 5 distinguishes right shift logical vs right shift arithmetic
                 case 0b110: operation = ALUop::OR; break;
                 case 0b111: operation = ALUop::AND; break;
-                default: throw std::runtime_error("unkown ALU operation(failed ALU imm)");
+                default: throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unkown ALU operation(failed ALU imm)");
             }
         
         regs_.write(instruction.rd, alu_.compute(regs_.read(instruction.rs1), instruction.imm, operation));
@@ -216,42 +261,37 @@ uint32_t CPU<ALUType>::execute_I(const DecodedInstruction& instruction, uint32_t
         const uint32_t addr = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::ADD);
         uint32_t result;
         switch (instruction.funct3) {
-        case 0b000: result = static_cast<uint32_t>(ram_.load_byte(addr)); break; // byte, signed
-        case 0b001: result = static_cast<uint32_t>(ram_.load_hws(addr)); break; //halfword , signed
-        case 0b010: result = ram_.load_ws(addr); break;//word signed
-        case 0b100: result = ram_.load_ubyte(addr); break;
-        case 0b101: result = ram_.load_uhw(addr); break;
-        default: throw std::runtime_error("illegal load instruction");
+        case 0b000: result = static_cast<uint32_t>(bus_.load_byte(addr)); break; // byte, signed
+        case 0b001: result = static_cast<uint32_t>(bus_.load_hws(addr)); break; //halfword , signed
+        case 0b010: result = bus_.load_ws(addr); break;//word signed
+        case 0b100: result = bus_.load_ubyte(addr); break;
+        case 0b101: result = bus_.load_uhw(addr); break;
+        default: throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "illegal load instruction");
         }
         regs_.write(instruction.rd, result);
         return current_pc + 4;
     }
     case 0x67: { //jalr
         const uint32_t target = (regs_.read(instruction.rs1) + instruction.imm) & ~1U; //calc target first to prevent issue w rs1 = rd
-        if (target % 4 == 0 && instruction.funct3 == 0) {
-            regs_.write(instruction.rd, current_pc + 4);
-            return target; // JALR requires bit 0 to be cleared in riscv spec
+        if (instruction.funct3 != 0) {
+            throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "illegal JALR instruction");
         }
-        throw std::runtime_error("instruction address misaligned"); //make this actual trap later 
+        if (target % 4 != 0) {
+            throw GuestFault(GuestFaultCause::InstructionAddressMisaligned, target, "instruction address misaligned"); //make this actual trap later
+        }
+        regs_.write(instruction.rd, current_pc + 4);
+        return target; // JALR requires bit 0 to be cleared in riscv spec
     }
     case 0x73: //system instructions, implementing privelege modes later 
         if (instruction.funct3 == 0 && instruction.imm == 0) {//check if it's an ECALL/EBREAK
-            //ECALL neesd syscall number, a7, a0-5 hold arguments for syscall, a0 is overwritten by os handler
-            const uint32_t syscall_num = regs_.read(17); // for now just implementing print, exit, and 
-            if (syscall_num == 1) {
-                std::cout << regs_.read(10) << std::endl; //read a0 and return to program
-                return current_pc + 4;
-            }
-            if (syscall_num == 93) {
-                std::cout << "exit code = " << regs_.read(10) << std::endl;
-                throw std::runtime_error("simulation halted");
-            }
-            std::cerr << "EBREAK HIT or unkown ECALL, syscal =" << regs_.read(10) << std::endl;
-            throw std::runtime_error("simulation halted");
+            throw GuestFault(GuestFaultCause::MachineModeEcall, 0, "machine-mode ECALL");
         }
-        throw std::runtime_error("unsupported csr instruction"); //csr instruction
+        if (instruction.funct3 == 0 && instruction.imm == 1) {
+            throw GuestFault(GuestFaultCause::Breakpoint, 0, "EBREAK");
+        }
+        throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "unsupported csr instruction"); //csr instruction
     case 0x0F: return current_pc + 4; // keep fence as no-op for now, too complicated plus just single-core emulator rn 
-    default: throw std::runtime_error("illegal i-type instruction");
+    default: throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "illegal i-type instruction");
     }
 }
 
@@ -260,10 +300,10 @@ template <typename ALUType>
 uint32_t CPU<ALUType>::execute_S(const DecodedInstruction& instruction, uint32_t current_pc) {
     const uint32_t target = alu_.compute(regs_.read(instruction.rs1), instruction.imm, ALUop::ADD);
     switch (instruction.funct3) {
-    case 0b000: ram_.store_byte(static_cast<uint8_t>(regs_.read(instruction.rs2)), target); break; //store byte
-    case 0b001: ram_.store_hw(static_cast<uint16_t>(regs_.read(instruction.rs2)), target); break;// halfword 
-    case 0b010: ram_.store_word(regs_.read(instruction.rs2), target); break; //word 
-    default: throw std::runtime_error("illegal funct3 for S-type instruction");
+    case 0b000: bus_.store_byte(static_cast<uint8_t>(regs_.read(instruction.rs2)), target); break; //store byte
+    case 0b001: bus_.store_hw(static_cast<uint16_t>(regs_.read(instruction.rs2)), target); break;// halfword
+    case 0b010: bus_.store_word(regs_.read(instruction.rs2), target); break; //word
+    default: throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "illegal funct3 for S-type instruction");
     }
     return current_pc + 4;
 }
@@ -273,7 +313,7 @@ uint32_t CPU<ALUType>::execute_U(const DecodedInstruction& instruction, uint32_t
     switch (instruction.opcode) {
     case 0x37: regs_.write(instruction.rd, instruction.imm); break;  //LUI
     case 0x17: regs_.write(instruction.rd, current_pc + instruction.imm); break; //AUIPC
-    default: throw std::runtime_error("invalid U-type instruction");
+    default: throw GuestFault(GuestFaultCause::IllegalInstruction, 0, "invalid U-type instruction");
     }
     return current_pc + 4;
 }
