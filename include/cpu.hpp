@@ -4,6 +4,7 @@
 #include "alu.hpp"
 #include "decoder.hpp"
 #include "memory.hpp"
+#include "loader.hpp"
 #include "register_file.hpp"
 
 #include <array>
@@ -49,9 +50,19 @@ public:
 
 //implementations for templated CPU class —----—------------------------
 
-template <typename ALUType>
+template <typename ALUType>//loads program into memory
 void CPU<ALUType>::load_program(const ProgramImage& image){
     ram_.load_program(image); 
+    if(!(image.entry_point >= Memory::BASE_OFFSET) || //validate entry point 
+    !(image.entry_point - Memory::BASE_OFFSET < Memory::BASE_OFFSET) ||
+    image.entry_point%4 == 0){
+        throw std::runtime_error("elf image not supported, entrypoint address inaccessible"); 
+    }
+    //validate entry point exists in loaded segment
+    if(!(image.segments[0].virtual_address <= image.entry_point < image.segments.end()->virtual_address + image.segments.end()->memory_size)){
+        throw std::runtime_error("entrypoint not within loaded segments"); 
+    }
+    pc_ = image.entry_point; 
 }
 
 template <typename ALUType> //decodes the instruction 
@@ -197,7 +208,7 @@ uint32_t CPU<ALUType>::execute_I(const DecodedInstruction& instruction, uint32_t
                 case 0b111: operation = ALUop::AND; break;
                 default: throw std::runtime_error("unkown ALU operation(failed ALU imm)");
             }
-        }
+        
         regs_.write(instruction.rd, alu_.compute(regs_.read(instruction.rs1), instruction.imm, operation));
         return current_pc + 4;
     }
@@ -243,6 +254,7 @@ uint32_t CPU<ALUType>::execute_I(const DecodedInstruction& instruction, uint32_t
     default: throw std::runtime_error("illegal i-type instruction");
     }
 }
+
 
 template <typename ALUType>
 uint32_t CPU<ALUType>::execute_S(const DecodedInstruction& instruction, uint32_t current_pc) {

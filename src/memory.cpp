@@ -114,6 +114,7 @@ void Memory::load_program(const ProgramImage& image){
             for(int i = 0; i < segment.file_data.size() ; i++){
                 store_byte(segment.file_data[i], offset + i); 
             }
+            //zero initialize rest of memory size for .bss 
             for(uint32_t j = 0; j < segment.memory_size - segment.file_data.size() ; j++){
                 store_byte(0x00, offset + segment.file_data.size() + j); 
             }

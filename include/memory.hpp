@@ -10,9 +10,6 @@ struct ProgramImage;
 
 class Memory {
 private:
-    static constexpr std::size_t RAM_SIZE = 128 * 1024 * 1024;
-    static constexpr uint32_t BASE_OFFSET = 0x80000000;// standard mem start
-
     std::vector<uint8_t> memory_; // store memory on heap s
                                   // program doesn't hit 
                                   // thread stack limit 
@@ -20,6 +17,8 @@ private:
     std::size_t translate_address(uint32_t address) const;
 
 public:
+    static constexpr std::size_t RAM_SIZE = 128 * 1024 * 1024;
+    static constexpr uint32_t BASE_OFFSET = 0x80000000;// standard mem start
     Memory();
 
     //load word, halfword, byte, signed/unsigned
