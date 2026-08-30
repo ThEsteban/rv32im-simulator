@@ -9,10 +9,12 @@ add_library(rv32i_core
     src/decoder.cpp
     src/memory.cpp
     src/register_file.cpp
+    src/loader.cpp
 )
 
 target_include_directories(rv32i_core PUBLIC include)
-target_compile_features(rv32i_core PUBLIC cxx_std_17)
+target_compile_features(rv32i_core PUBLIC cxx_std_20)
+
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(rv32i_core PRIVATE -Wall -Wextra -Wpedantic)
@@ -23,3 +25,5 @@ enable_testing()
 add_executable(test_cpu tests/test_cpu.cpp)
 target_link_libraries(test_cpu PRIVATE rv32i_core)
 add_test(NAME cpu_pipeline COMMAND test_cpu)
+
+

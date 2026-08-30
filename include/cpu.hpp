@@ -43,9 +43,16 @@ public:
     uint32_t read_memory_word(uint32_t addr) const { return ram_.load_uw(addr); }
     uint32_t read_memory_byte(uint32_t addr) const { return ram_.load_ubyte(addr); }
     uint32_t get_register(std::size_t index) const { return regs_.read(index); }
+    void load_program(const ProgramImage& image); 
 };
 
+
 //implementations for templated CPU class —----—------------------------
+
+template <typename ALUType>
+void CPU<ALUType>::load_program(const ProgramImage& image){
+    ram_.load_program(image); 
+}
 
 template <typename ALUType> //decodes the instruction 
 DecodedInstruction CPU<ALUType>::decode(uint32_t instruction) {
@@ -130,7 +137,14 @@ uint32_t CPU<ALUType>::execute_branch(const DecodedInstruction& instruction, uin
         //handle illegal instruction exception here (for now, just assert or return pc+4)
         throw std::runtime_error("illegal branch instruction");
     }
-    return take ? current_pc + instruction.imm : current_pc + 4;
+    if(take){
+        uint32_t jump = current_pc + instruction.imm; 
+        if(jump%4 != 0){
+            throw std::runtime_error("Misaligned address"); 
+        }else return jump; 
+    }
+    return current_pc +4 ; 
+   // return take ? current_pc + instruction.imm : current_pc + 4;
 }
 
 //these all determine aluop and call compute, 
@@ -138,23 +152,25 @@ template <typename ALUType>
 uint32_t CPU<ALUType>::execute_R(const DecodedInstruction& instruction, uint32_t current_pc) {
     ALUop operation;
     switch (instruction.funct3) {
-    case 0b000:
-        if (instruction.funct7 == 0x20) operation = ALUop::SUB;
-        else if (instruction.funct7 == 0x00) operation = ALUop::ADD;
-        else throw std::runtime_error("unkown ALU instruction, funct7 not valid for funct3=0");
-        break;
-    case 0b001: operation = ALUop::SLL; break;
-    case 0b010: operation = ALUop::SLT; break;
-    case 0b011: operation = ALUop::SLTU; break;
-    case 0b100: operation = ALUop::XOR; break;
-    case 0b101:
-        if (instruction.funct7 == 0x20) operation = ALUop::SRA;
-        else if (instruction.funct7 == 0x00) operation = ALUop::SRL;
-        else throw std::runtime_error("unknown ALU instruction, funct7 not valid for funct3 = 5");
-        break;
-    case 0b110: operation = ALUop::OR; break;
-    case 0b111: operation = ALUop::AND; break;
-    default: throw std::runtime_error("unknown ALU operation");
+        case 0b000:
+            if (instruction.funct7 == 0x20) operation = ALUop::SUB;
+            else if (instruction.funct7 == 0x00) operation = ALUop::ADD;
+            else throw std::runtime_error("unkown ALU instruction, funct7 not valid for funct3=0");
+            break;
+        if (!(instruction.funct7)){
+        case 0b001: operation = ALUop::SLL; break;
+        case 0b010: operation = ALUop::SLT; break;
+        case 0b011: operation = ALUop::SLTU; break;
+        case 0b100: operation = ALUop::XOR; break;
+        case 0b110: operation = ALUop::OR; break;
+        case 0b111: operation = ALUop::AND; break;
+        }
+        case 0b101:
+            if (instruction.funct7 == 0x20) operation = ALUop::SRA;
+            else if (instruction.funct7 == 0x00) operation = ALUop::SRL;
+            else throw std::runtime_error("unknown ALU instruction, funct7 not valid for funct3 = 5");
+            break;
+        default: throw std::runtime_error("unknown ALU operation");
     }
     //multiply extension r types utilize r type = 0x01; 
     regs_.write(instruction.rd, alu_.compute(regs_.read(instruction.rs1), regs_.read(instruction.rs2), operation));
@@ -167,15 +183,20 @@ uint32_t CPU<ALUType>::execute_I(const DecodedInstruction& instruction, uint32_t
     case 0x13: { //alu immediate computations
         ALUop operation;
         switch (instruction.funct3) {
-        case 0b000: operation = ALUop::ADD; break;
-        case 0b001: operation = ALUop::SLL; break;
-        case 0b010: operation = ALUop::SLT; break;
-        case 0b011: operation = ALUop::SLTU; break;
-        case 0b100: operation = ALUop::XOR; break;
-        case 0b101: operation = instruction.funct7 & 0x20 ? ALUop::SRA : ALUop::SRL; break; //funct7 bit 5 distinguishes right shift logical vs right shift arithmetic
-        case 0b110: operation = ALUop::OR; break;
-        case 0b111: operation = ALUop::AND; break;
-        default: throw std::runtime_error("unkown ALU operation(failed ALU imm)");
+                case 0b000: operation = ALUop::ADD; break;
+                case 0b001: 
+                    if(instruction.funct7 == 0x00){
+                        operation = ALUop::SLL;  
+                    }else throw std::runtime_error("illegal operation"); 
+                break;
+                case 0b010: operation = ALUop::SLT; break;
+                case 0b011: operation = ALUop::SLTU; break;
+                case 0b100: operation = ALUop::XOR; break;
+                case 0b101: operation = instruction.funct7 & 0x20 ? ALUop::SRA : ALUop::SRL; break; //funct7 bit 5 distinguishes right shift logical vs right shift arithmetic
+                case 0b110: operation = ALUop::OR; break;
+                case 0b111: operation = ALUop::AND; break;
+                default: throw std::runtime_error("unkown ALU operation(failed ALU imm)");
+            }
         }
         regs_.write(instruction.rd, alu_.compute(regs_.read(instruction.rs1), instruction.imm, operation));
         return current_pc + 4;

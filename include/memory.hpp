@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <span>
+
+struct ProgramImage; 
 
 class Memory {
 private:
@@ -36,6 +39,10 @@ public:
     void store_byte(uint8_t value, uint32_t addr);
     void store_hw(uint16_t value, uint32_t addr);
     void store_word(uint32_t value, uint32_t addr);
+
+    //load program into memory 
+    void load_program(const ProgramImage& image);
+
 };
 
 #endif
