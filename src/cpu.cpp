@@ -1,4 +1,5 @@
 #include "cpu.hpp"
+#include <iostream>
 
 
 //loads program into memory
@@ -101,8 +102,17 @@ void CPU::clk() {
         }
         pc_ = (this->*handler)(decoded, current_pc);
     }catch(const GuestFault& fault){            
-        uint32_t error_address = (csrs_.read(MachineCSRs::MTVEC).value() & ~0x0003) ; 
-        if (error_address == current_pc){// catch a double fault error
+        uint32_t mtvec = (csrs_.read(MachineCSRs::MTVEC).value() & ~0x0003) ; 
+        if (mtvec == current_pc){// catch a double fault error and show where it was using CSRs 
+            uint32_t mepc = csrs_.read(MachineCSRs::MEPC).value();
+            uint32_t mcause = csrs_.read(MachineCSRs::MCAUSE).value();
+            uint32_t mtval = csrs_.read(MachineCSRs::MTVAL).value();
+
+            std::cerr << "\n--- FATAL DOUBLE FAULT ---\n";
+            std::cerr << "Original Faulting PC: 0x" << std::hex << mepc << "\n";
+            std::cerr << "MCAUSE code: " << std::dec << mcause << "\n";
+            std::cerr << "MTVAL (Bad Address/Instruction): 0x" << std::hex << mtval << "\n\n";
+            
             throw std::runtime_error("Double fault: trap vector is unmapped (oops) or invalid"); 
         }
         enter_trap(fault.cause(), fault.mtval(), current_pc);
@@ -182,6 +192,7 @@ uint32_t CPU::execute_branch(const DecodedInstruction& instruction, uint32_t cur
    // return take ? current_pc + instruction.imm : current_pc + 4;
 }
 
+
 uint32_t CPU::execute_system(
     const DecodedInstruction& instruction,
     uint32_t current_pc
@@ -226,9 +237,7 @@ uint32_t CPU::execute_system(
         }
     }
 
-    const uint16_t csrAddress = static_cast<uint16_t>(
-        static_cast<uint32_t>(instruction.imm) & 0xFFFu
-    );
+    const uint16_t csrAddress = static_cast<uint16_t>(static_cast<uint32_t>(instruction.imm) & 0xFFFu);
     const auto oldValue = csrs_.read(csrAddress);
     if (!oldValue.has_value()) {
         throw GuestFault(
