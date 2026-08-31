@@ -8,6 +8,7 @@ DecodedInstruction Decoder::decode(uint32_t instruction) {
     constexpr uint32_t mask12 = 0x0FFF;
 
     DecodedInstruction decoded;
+    decoded.raw = instruction;
     decoded.opcode = instruction & mask7; //isiolate bottom 7 bits
     switch (decoded.opcode) {// switch to fetch type of instruction 
     case 0x33: decoded.type = InstructionType::R; break;

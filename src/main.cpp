@@ -1,5 +1,6 @@
 #include "cpu.hpp"
 #include "loader.hpp"
+#include "guest_fault.hpp"
 
 #include <cstddef>
 #include <exception>
@@ -20,6 +21,7 @@ int main(int argc, char* argv[]){
         cpu.load_program(image);
 
         constexpr std::size_t maxInstructions = 1'000'000;
+        //execution loop
         for(std::size_t instructionCount = 0; instructionCount < maxInstructions; ++instructionCount){
             if(cpu.halted()){
                 if(cpu.exit_code() != 0){
@@ -28,8 +30,9 @@ int main(int argc, char* argv[]){
                 }
                 return 0;
             }
+            
             cpu.clk();
-        }
+        } 
 
         if(cpu.halted()){
             if(cpu.exit_code() != 0){
@@ -43,7 +46,7 @@ int main(int argc, char* argv[]){
         return 2;
 
     }catch(const GuestFault& fault){
-        std::cerr << "guest fault: cause=" << fault.cause()
+        std::cerr << "guest fault: cause=" << static_cast<uint32_t>(fault.cause())
                   << " mtval=0x" << std::hex << fault.mtval()
                   << ": " << fault.what() << std::endl;
         return 1;

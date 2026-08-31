@@ -6,6 +6,8 @@
 #include "decoder.hpp"
 #include "loader.hpp"
 #include "register_file.hpp"
+#include "csrs.hpp"
+#include "guest_fault.hpp"
 
 #include <array>
 #include <cstddef>
@@ -13,9 +15,11 @@
 #include <iosfwd>
 #include <stdexcept>
 
-//CPU is now a template for any ALU you implement in extensionALU.hpp
+
+//CPU uses the current integer ALU implementation.
 class CPU {
 private:
+    MachineCSRs csrs_;
     Bus bus_;
     RegisterFile regs_;
     uint32_t pc_ = 0x80000000;
@@ -34,13 +38,16 @@ private:
     uint32_t execute_branch(const DecodedInstruction& instruction, uint32_t current_pc);
     uint32_t execute_U(const DecodedInstruction& instruction, uint32_t current_pc);
     uint32_t execute_J(const DecodedInstruction& instruction, uint32_t current_pc);
+    uint32_t execute_system(const DecodedInstruction& instruction, uint32_t current_pc);
 
 public:
     DecodedInstruction decode(uint32_t instruction);
     uint32_t read_pc() const;
     uint32_t execute(const DecodedInstruction& instruction, uint32_t current_pc);
     void clk();
-    void reset() { pc_ = 0x80000000; regs_ = RegisterFile(); }
+    void enter_trap(GuestFaultCause cause, uint32_t mtval, uint32_t address);
+
+    void reset();
     CPU(); //constructor populates dispatch table
     explicit CPU(std::ostream& uart_output);
     void write_memory_word(uint32_t addr, uint32_t value) { bus_.store_word(value, addr); }

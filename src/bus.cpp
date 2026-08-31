@@ -3,22 +3,6 @@
 #include "loader.hpp"
 
 #include <iostream>
-#include <utility>
-
-GuestFault::GuestFault(GuestFaultCause cause, uint32_t mtval, std::string message)
-    : cause_(cause), mtval_(mtval), message_(std::move(message)) {}
-
-uint32_t GuestFault::cause() const noexcept {
-    return static_cast<uint32_t>(cause_);
-}
-
-uint32_t GuestFault::mtval() const noexcept {
-    return mtval_;
-}
-
-const char* GuestFault::what() const noexcept {
-    return message_.c_str();
-}
 
 Bus::Bus() : Bus(std::cout) {}
 
@@ -174,4 +158,9 @@ bool Bus::halted() const noexcept {
 
 uint32_t Bus::exit_code() const noexcept {
     return exit_code_;
+}
+
+void Bus::reset_halt_state() noexcept {
+    halted_ = false;
+    exit_code_ = 0;
 }

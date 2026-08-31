@@ -1,6 +1,5 @@
 #ifndef ALU_HPP
 #define ALU_HPP
-#define INT32_MIN (-2147483647-1); 
 
 #include <cstdint>
 
@@ -18,7 +17,7 @@ enum class ALUop {
     //multiplying instructions 
     MUL, //choose lower 32 bits unsigned/signed, produces same bit pattern modulo 2^32
     MULH,  //signed * signed upper 32 bits
-    MULHSU,// upper 32 bits unsigned * signed
+    MULHSU,// upper 32 bits signed * unsigned
     MULHU, //upper 32 bits unsigned * unsigned
     DIV, //signed div
     DIVU, // unsigned

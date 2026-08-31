@@ -2,6 +2,7 @@
 #define BUS_HPP
 
 #include "memory.hpp"
+#include "guest_fault.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -11,32 +12,6 @@
 
 struct ProgramImage;
 
-enum class GuestFaultCause : uint32_t {
-    InstructionAddressMisaligned = 0,
-    InstructionAccessFault = 1,
-    IllegalInstruction = 2,
-    Breakpoint = 3,
-    LoadAddressMisaligned = 4,
-    LoadAccessFault = 5,
-    StoreAddressMisaligned = 6,
-    StoreAccessFault = 7,
-    MachineModeEcall = 11,
-};
-
-//set up class to be report user program errors and send it to a trap
-class GuestFault : public std::exception {
-public:
-    GuestFault(GuestFaultCause cause, uint32_t mtval, std::string message);
-
-    uint32_t cause() const noexcept;
-    uint32_t mtval() const noexcept; 
-    const char* what() const noexcept override;
-
-private:
-    GuestFaultCause cause_;
-    uint32_t mtval_; //machine trap value CSR 
-    std::string message_;
-};
 
 class Bus {
 public:
@@ -46,8 +21,8 @@ public:
     // 0x10000005             byte-width UART line-status register
     // 0x80000000-0x87FFFFFF  128 MB RAM
     static constexpr uint32_t TEST_FINISHER = 0x00100000;
-    static constexpr uint32_t UART_TX = 0x10000000; 
-    static constexpr uint32_t UART_LINE_STATUS = 0x10000005;  
+    static constexpr uint32_t UART_TX = 0x10000000;
+    static constexpr uint32_t UART_LINE_STATUS = 0x10000005;
 
     Bus();
     explicit Bus(std::ostream& uart_output);
@@ -70,10 +45,11 @@ public:
 
     bool halted() const noexcept;
     uint32_t exit_code() const noexcept;
+    void reset_halt_state() noexcept;
 
 private:
     Memory ram_;
-    std::ostream* uart_output_; 
+    std::ostream* uart_output_;
     bool halted_ = false;
     uint32_t exit_code_ = 0;
 };

@@ -1,6 +1,9 @@
-# RV32I Simulator
+# RV32IM Simulator
 
-A C++17 RISC-V RV32I simulator.
+A C++20 RISC-V RV32IM functional emulator with a minimal Machine-mode
+exception system and Zicsr support. Synchronous exceptions use direct `mtvec`
+trap entry; interrupts, Supervisor/User modes, paging, and vectored traps are
+not implemented.
 
 ## Build and test
 

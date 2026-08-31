@@ -16,6 +16,7 @@ enum class InstructionType {
 };
 
 struct DecodedInstruction {
+    uint32_t raw = 0;
     int32_t imm = 0; //immediate value, 
     uint8_t opcode = 0;
     uint8_t rd = 0; //destination register
